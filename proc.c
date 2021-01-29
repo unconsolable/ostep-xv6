@@ -143,6 +143,9 @@ userinit(void)
   p->tf->esp = PGSIZE;
   p->tf->eip = 0;  // beginning of initcode.S
   p->tickets = 10;
+  acquire(&tickslock);
+  p->totalsleep = ticks;
+  release(&tickslock);
 
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
@@ -226,6 +229,10 @@ fork(void)
 
   release(&ptable.lock);
 
+  acquire(&tickslock);
+  np->totalsleep = ticks;
+  release(&tickslock);
+
   return pid;
 }
 
@@ -303,6 +310,9 @@ wait(void)
         p->name[0] = 0;
         p->killed = 0;
         p->state = UNUSED;
+        p->tickets = 0;
+        p->totalsleep = 0;
+        p->lastsleep = 0;
         release(&ptable.lock);
         return pid;
       }
@@ -371,6 +381,14 @@ scheduler(void)
     c->proc = p;
     switchuvm(p);
     p->state = RUNNING;
+
+    // Calc the sleep time for proc p
+    acquire(&tickslock);
+    if (p->lastsleep) {
+      p->totalsleep += ticks - (p->lastsleep);
+      p->lastsleep = 0;
+    }
+    release(&tickslock);
 
     swtch(&(c->scheduler), p->context);
     switchkvm();
@@ -462,6 +480,11 @@ sleep(void *chan, struct spinlock *lk)
     acquire(&ptable.lock);  //DOC: sleeplock1
     release(lk);
   }
+  // Record the last sleep time
+  acquire(&tickslock);
+  p->lastsleep = ticks;
+  // cprintf("pid:%d,sleep:%d\n", p->pid, p->lastsleep);
+  release(&tickslock);
   // Go to sleep.
   p->chan = chan;
   p->state = SLEEPING;
@@ -588,8 +611,10 @@ int getpinfo(struct pstat *ps)
     ps->inuse[i] = 1;
     ps->pid[i] = p->pid;
     ps->tickets[i] = p->tickets;
-    // TODO: store the ticks for the process
-    ps->ticks[i] = 0;
+    acquire(&tickslock);
+    ps->ticks[i] = ticks - (p->totalsleep);
+    release(&tickslock);
+    i++;
   }
 
   return 0;
