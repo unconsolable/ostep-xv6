@@ -6,10 +6,13 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "pstat.h"
+#include "krand.h"
 
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
+  int totaltickets;
 } ptable;
 
 static struct proc *initproc;
@@ -24,6 +27,7 @@ void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
+  ptable.totaltickets = 0;
 }
 
 // Must be called with interrupts disabled
@@ -138,6 +142,7 @@ userinit(void)
   p->tf->eflags = FL_IF;
   p->tf->esp = PGSIZE;
   p->tf->eip = 0;  // beginning of initcode.S
+  p->tickets = 10;
 
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
@@ -148,6 +153,7 @@ userinit(void)
   // because the assignment might not be atomic.
   acquire(&ptable.lock);
 
+  ptable.totaltickets += p->tickets;
   p->state = RUNNABLE;
 
   release(&ptable.lock);
@@ -214,6 +220,8 @@ fork(void)
 
   acquire(&ptable.lock);
 
+  np->tickets = curproc->tickets;
+  ptable.totaltickets += curproc->tickets;
   np->state = RUNNABLE;
 
   release(&ptable.lock);
@@ -327,31 +335,50 @@ scheduler(void)
   c->proc = 0;
   
   for(;;){
+    int lottery = rand() % ptable.totaltickets;
+    int ticketcounter = 0, allsleeping = 1;
     // Enable interrupts on this processor.
     sti();
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
-
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
-
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
-
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
+    for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+      ticketcounter += p->tickets;
+      if (ticketcounter > lottery && (p->state == RUNNABLE || p->state == RUNNING)) {
+        allsleeping = 0;
+        break;
+      }
+      /*
+       * Debug printing:
+       * cprintf("finding...ticketcounter = %d, lottery = %d, pid = %d, p->state = %d\n", ticketcounter, lottery, p->pid, p->state);    
+       */
     }
-    release(&ptable.lock);
+    if (allsleeping) {
+      /*
+       * Debug printing:
+       * cprintf("no available proc, continue");
+       */
+      release(&ptable.lock);
+      continue;
+    }
+    /*
+     * Debug printing:
+     * cprintf("found. total = %d, lottery = %d, pid = %d\n", ptable.totaltickets, lottery, p->pid);
+     */
+    // Switch to chosen process.  It is the process's job
+    // to release ptable.lock and then reacquire it
+    // before jumping back to us.
+    c->proc = p;
+    switchuvm(p);
+    p->state = RUNNING;
 
+    swtch(&(c->scheduler), p->context);
+    switchkvm();
+
+    // Process is done running for now.
+    // It should have changed its p->state before coming back.
+    c->proc = 0;
+    release(&ptable.lock);
   }
 }
 
@@ -531,4 +558,39 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+int settickets(int new)
+{
+  struct proc *curproc = myproc();
+  acquire(&ptable.lock);
+  ptable.totaltickets -= curproc->tickets;
+  curproc->tickets = new;
+  ptable.totaltickets += new;
+  release(&ptable.lock);
+  return 0;
+}
+
+int getpinfo(struct pstat *ps)
+{
+  int i;
+  struct proc *p;
+  for (i = 0; i < NPROC; ++i)
+  {
+    ps->inuse[i] = 0;
+  }
+  i = 0;
+
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+  {
+    if (p->state == UNUSED)
+      continue;
+    ps->inuse[i] = 1;
+    ps->pid[i] = p->pid;
+    ps->tickets[i] = p->tickets;
+    // TODO: store the ticks for the process
+    ps->ticks[i] = 0;
+  }
+
+  return 0;
 }
