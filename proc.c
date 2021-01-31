@@ -209,6 +209,10 @@ fork(void)
   np->parent = curproc;
   *np->tf = *curproc->tf;
 
+  // Update thref, threfptr, thstkend
+  np->thref = 1;
+  np->threfptr = (void *)0;
+  np->thstkend = 0;
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
 
@@ -257,6 +261,12 @@ exit(void)
     }
   }
 
+  // Decrement *threfptr for threads, or thref for process
+  if (curproc->thref == -1)
+    --*curproc->threfptr;
+  else
+    --curproc->thref;
+
   begin_op();
   iput(curproc->cwd);
   end_op();
@@ -264,7 +274,7 @@ exit(void)
 
   acquire(&ptable.lock);
 
-  // Parent might be sleeping in wait().
+  // Parent might be sleeping in join().
   wakeup1(curproc->parent);
 
   // Pass abandoned children to init.
@@ -296,7 +306,7 @@ wait(void)
     // Scan through table looking for exited children.
     havekids = 0;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->parent != curproc)
+      if(p->thref == -1 ||  p->parent != curproc)
         continue;
       havekids = 1;
       if(p->state == ZOMBIE){
@@ -483,7 +493,6 @@ sleep(void *chan, struct spinlock *lk)
   // Record the last sleep time
   acquire(&tickslock);
   p->lastsleep = ticks;
-  // cprintf("pid:%d,sleep:%d\n", p->pid, p->lastsleep);
   release(&tickslock);
   // Go to sleep.
   p->chan = chan;
@@ -583,7 +592,8 @@ procdump(void)
   }
 }
 
-int settickets(int new)
+int 
+settickets(int new)
 {
   struct proc *curproc = myproc();
   acquire(&ptable.lock);
@@ -594,7 +604,8 @@ int settickets(int new)
   return 0;
 }
 
-int getpinfo(struct pstat *ps)
+int 
+getpinfo(struct pstat *ps)
 {
   int i;
   struct proc *p;
@@ -618,4 +629,118 @@ int getpinfo(struct pstat *ps)
   }
 
   return 0;
+}
+
+// Create a new process using the same address space.
+// Sets up stack to return as if from call fcn.
+// Caller must set state of returned proc to RUNNABLE.
+int
+clone(void (*fcn)(void *, void *), void *arg1, void *arg2, void *stack)
+{
+  int i, pid;
+  struct proc *np;
+  struct proc *curproc = myproc();
+
+  // Allocate process.
+  if((np = allocproc()) == 0){
+    return -1;
+  }
+
+  // Share the address space and page table
+  np->pgdir = curproc->pgdir;
+  np->sz = curproc->sz;
+  np->parent = curproc;
+  *np->tf = *curproc->tf;
+
+  // Update thref, threfptr, thstkend
+  np->thref = -1;
+  if (curproc->thref > 0)
+    np->threfptr = &curproc->thref;
+  else
+    np->threfptr = curproc->threfptr;
+  ++*np->threfptr;
+  np->thstkend = stack;
+
+  // Set PC to func
+  np->tf->eip = (uint)fcn;
+  // Push the args to the stack
+  uint *uintsdk = (uint *)((uint)stack + PGSIZE - 4);
+  *uintsdk-- = (uint)arg2;
+  *uintsdk-- = (uint)arg1;
+  *uintsdk = FAKE_RETURN_PC;
+  np->tf->oesp = (uint)uintsdk;
+  np->tf->esp = (uint)uintsdk;
+  // Clear %eax so that fork returns 0 in the child.
+  np->tf->eax = 0;
+
+  // Duplicate the open files
+  for(i = 0; i < NOFILE; i++)
+    if(curproc->ofile[i])
+      np->ofile[i] = filedup(curproc->ofile[i]);
+  np->cwd = idup(curproc->cwd);
+
+  // Set proc name, stare, tickets, totalsleepticks
+  safestrcpy(np->name, curproc->name, sizeof(curproc->name));
+
+  pid = np->pid;
+
+  acquire(&ptable.lock);
+
+  np->tickets = curproc->tickets;
+  ptable.totaltickets += curproc->tickets;
+  np->state = RUNNABLE;
+
+  release(&ptable.lock);
+
+  acquire(&tickslock);
+  np->totalsleep = ticks;
+  release(&tickslock);
+
+  return pid;
+}
+
+int
+join (void **stack)
+{
+  struct proc *p;
+  int havethreads, pid;
+  struct proc *curproc = myproc();
+  
+  acquire(&ptable.lock);
+  for (;;){
+    // Scan through table looking for exited thread.
+    havethreads = 0;
+    for (p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->thref != -1 || p->parent != curproc)
+        continue;
+      havethreads = 1;
+      if(p->state == ZOMBIE){
+        // Found one.
+        pid = p->pid;
+        p->kstack = 0;
+        p->pgdir = 0;
+        p->pid = 0;
+        p->parent = 0;
+        p->name[0] = 0;
+        p->killed = 0;
+        p->state = UNUSED;
+        p->tickets = 0;
+        p->totalsleep = 0;
+        p->lastsleep = 0;
+        p->threfptr = 0;
+        *stack = p->thstkend;
+        release(&ptable.lock);
+        return pid;
+      } 
+    }
+
+    // No point waiting if we don't have any children.
+    if(!havethreads || curproc->killed){
+      release(&ptable.lock);
+      return -1;
+    }
+
+    // Wait for children to exit.  (See wakeup1 call in proc_exit.)
+    sleep(curproc, &ptable.lock);  //DOC: wait-sleep
+  }
 }

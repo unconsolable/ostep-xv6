@@ -478,3 +478,28 @@ sys_munprotect(void)
     return -1;
   return munprotect((uint)addr, len);
 }
+
+int
+sys_clone(void)
+{
+  void (*fcn)(void *, void *);
+  void *arg1, *arg2, *stack;
+  if (argptr(0, (char **)&fcn, sizeof(void (*)(void *, void *)) < 0))
+    return -1;
+  if (argptr(1, (char **)&arg1, sizeof(void *)) < 0)
+    return -1;
+  if (argptr(2, (char **)&arg2, sizeof(void *)) < 0)
+    return -1;
+  if (argptr(3, (char **)&stack, sizeof(void *)) < 0)
+    return -1;
+  return clone(fcn, arg1, arg2, stack);
+}
+
+int
+sys_join(void)
+{
+  void **stack;
+  if (argptr(0, (char **)&stack, sizeof(void **)) < 0)
+    return -1;
+  return join(stack);
+}

@@ -78,6 +78,7 @@ trap(struct trapframe *tf)
     lapiceoi();
     break;
 
+  /* 
   case T_PAGEFAULT:
     if(myproc() == 0 || (tf->cs&3) == 0){
       // In kernel, it must be our mistake.
@@ -89,6 +90,7 @@ trap(struct trapframe *tf)
     cprintf("Segmentation fault\n");
     myproc()->killed = 1;
     break;
+   */
   
   //PAGEBREAK: 13
   default:
