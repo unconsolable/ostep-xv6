@@ -454,3 +454,27 @@ sys_getreadcount(void)
 {
   return readcnt;
 }
+
+int
+sys_mprotect(void)
+{
+  void *addr;
+  int len;
+  if (argptr(0, (char **)&addr, sizeof(void *)) < 0)
+    return -1;
+  if (argint(1, &len) < 0)
+    return -1;
+  return mprotect((uint)addr, len);
+}
+
+int
+sys_munprotect(void)
+{
+  void *addr;
+  int len;
+  if (argptr(0, (char **)&addr, sizeof(void *)) < 0)
+    return -1;
+  if (argint(1, &len) < 0)
+    return -1;
+  return munprotect((uint)addr, len);
+}
