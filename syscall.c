@@ -21,6 +21,12 @@ fetchint(uint addr, int *ip)
 
   if(addr >= curproc->sz || addr+4 > curproc->sz)
     return -1;
+  // Address of a proc's virtual memory
+  // starts from PGSIZE
+  // EXCEPT initcode.S
+  if (addr < PGSIZE && curproc->pid != INIT_PID) {
+    return -1;
+  }
   *ip = *(int*)(addr);
   return 0;
 }
@@ -34,7 +40,12 @@ fetchstr(uint addr, char **pp)
   char *s, *ep;
   struct proc *curproc = myproc();
 
+  // Address of a proc's virtual memory
+  // starts from PGSIZE
+  // EXCEPT initcode.S
   if(addr >= curproc->sz)
+    return -1;
+  if (addr < PGSIZE && curproc->pid != INIT_PID)
     return -1;
   *pp = (char*)addr;
   ep = (char*)curproc->sz;

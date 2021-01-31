@@ -109,8 +109,6 @@ sys_getpinfo(void)
   
   if (argptr(0, (char **)&ps, sizeof(struct pstat)) < 0)
     return -1;
-  if (!ps)
-    return -1;
   
   return getpinfo(ps);
 }
