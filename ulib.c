@@ -3,6 +3,7 @@
 #include "fcntl.h"
 #include "user.h"
 #include "x86.h"
+#include "ticketlock.h"
 
 char*
 strcpy(char *s, const char *t)
@@ -120,4 +121,34 @@ thread_join()
         return -1;
     free(stack);
     return 0;
+}
+
+// inplement a ticket lock via exchange-and-add
+void lock_init(lock_t *lk)
+{
+  lk->ticket = 0;
+  lk->turn = 0;
+}
+
+void lock_acquire(lock_t *lk)
+{
+  uint myturn = xaddl(&lk->ticket);
+  // load lk->turn MUST be atomic
+  // cmpxchg can be replaced by a atomic load instr
+  uint lkturn = cmpxchg(&lk->turn, myturn, myturn);
+  while (lkturn != myturn)
+    lkturn = cmpxchg(&lk->turn, myturn, myturn); // spin
+  // Tell the C compiler and the processor to not move loads or stores
+  // past this point, to ensure that the critical section's memory
+  // references happen after the lock is acquired.
+  __sync_synchronize();
+}
+
+void lock_release(lock_t *lk)
+{
+  xaddl(&lk->turn);
+  // Tell the C compiler and the processor to not move loads or stores
+  // past this point, to ensure that the critical section's memory
+  // references happen after the lock is acquired.
+  __sync_synchronize();
 }
