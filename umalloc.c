@@ -2,6 +2,7 @@
 #include "stat.h"
 #include "user.h"
 #include "param.h"
+#include "ticketlock.h"
 
 // Memory allocator by Kernighan and Ritchie,
 // The C programming Language, 2nd ed.  Section 8.7.
@@ -20,9 +21,23 @@ typedef union header Header;
 
 static Header base;
 static Header *freep;
+// no need to call lock_init as freeplk is set to zero 
+static lock_t freeplk;
+
+void free_without_lock(void *ap);
 
 void
 free(void *ap)
+{
+  // lock freep for multi-thread process
+  lock_acquire(&freeplk);
+  free_without_lock(ap);
+  lock_release(&freeplk);
+}
+
+// freeplk should be locked before call
+void
+free_without_lock(void *ap)
 {
   Header *bp, *p;
 
@@ -43,6 +58,7 @@ free(void *ap)
   freep = p;
 }
 
+// freeplk is locked before morecore()
 static Header*
 morecore(uint nu)
 {
@@ -56,7 +72,8 @@ morecore(uint nu)
     return 0;
   hp = (Header*)p;
   hp->s.size = nu;
-  free((void*)(hp + 1));
+  // free_without_lock() to avoid deadlock
+  free_without_lock((void*)(hp + 1));
   return freep;
 }
 
@@ -66,6 +83,8 @@ malloc(uint nbytes)
   Header *p, *prevp;
   uint nunits;
 
+  // lock freep for multi-thread process
+  lock_acquire(&freeplk);
   nunits = (nbytes + sizeof(Header) - 1)/sizeof(Header) + 1;
   if((prevp = freep) == 0){
     base.s.ptr = freep = prevp = &base;
@@ -81,10 +100,15 @@ malloc(uint nbytes)
         p->s.size = nunits;
       }
       freep = prevp;
+      // release lock
+      lock_release(&freeplk);
       return (void*)(p + 1);
     }
     if(p == freep)
-      if((p = morecore(nunits)) == 0)
+      if((p = morecore(nunits)) == 0) {
+        // release lock
+        lock_release(&freeplk);
         return 0;
+      }
   }
 }
