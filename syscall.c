@@ -120,6 +120,8 @@ extern int sys_settickets(void);
 extern int sys_getpinfo(void);
 extern int sys_mprotect(void);
 extern int sys_munprotect(void);
+extern int sys_clone(void);
+extern int sys_join(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -147,7 +149,9 @@ static int (*syscalls[])(void) = {
 [SYS_settickets]   sys_settickets,
 [SYS_getpinfo]   sys_getpinfo,
 [SYS_mprotect]   sys_mprotect,
-[SYS_munprotect]   sys_munprotect
+[SYS_munprotect]   sys_munprotect,
+[SYS_clone]        sys_clone,
+[SYS_join]         sys_join
 };
 
 void

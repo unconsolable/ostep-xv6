@@ -14,6 +14,7 @@ extern struct cpu cpus[NCPU];
 extern int ncpu;
 
 #define INIT_PID 1
+#define FAKE_RETURN_PC 0xffffffff
 
 //PAGEBREAK: 17
 // Saved registers for kernel context switches.
@@ -54,6 +55,11 @@ struct proc {
   int tickets;                 // Tickets for lottery scheduler
   int totalticks;              // Running ticks in total
   int lastrunticks;            // The tick of last running
+  // tref of a proc will be positive, a thread will be -1
+  int thref;                   // Reference count of the address space
+  // trefptr of a thread will be valid, a proc will be 0
+  int *threfptr;               // Reference count of the address space
+  void *thstkend;                // End of the stack, used in join(), 0 for proc 
 };
 
 // Process memory is laid out contiguously, low addresses first:
