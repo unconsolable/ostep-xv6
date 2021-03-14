@@ -184,6 +184,7 @@ UPROGS=\
 	_zombie\
 	_lotterytest\
 	_nullptrtest\
+	_modinstrtest\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)
