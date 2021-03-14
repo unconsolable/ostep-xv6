@@ -12,7 +12,6 @@
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
-  int totaltickets;
 } ptable;
 
 static struct proc *initproc;
@@ -27,7 +26,6 @@ void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
-  ptable.totaltickets = 0;
 }
 
 // Must be called with interrupts disabled
@@ -143,6 +141,7 @@ userinit(void)
   p->tf->esp = PGSIZE;
   p->tf->eip = 0;  // beginning of initcode.S
   p->tickets = 10;
+  p->totalticks = 0;
 
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
@@ -153,7 +152,6 @@ userinit(void)
   // because the assignment might not be atomic.
   acquire(&ptable.lock);
 
-  ptable.totaltickets += p->tickets;
   p->state = RUNNABLE;
 
   release(&ptable.lock);
@@ -218,10 +216,10 @@ fork(void)
 
   pid = np->pid;
   np->tickets = curproc->tickets;
+  np->totalticks = 0;
 
   acquire(&ptable.lock);
 
-  ptable.totaltickets += curproc->tickets;
   np->state = RUNNABLE;
 
   release(&ptable.lock);
@@ -254,6 +252,10 @@ exit(void)
   iput(curproc->cwd);
   end_op();
   curproc->cwd = 0;
+
+  acquire(&tickslock);
+  curproc->totalticks += ticks - curproc->lastrunticks;
+  release(&tickslock);
 
   acquire(&ptable.lock);
 
@@ -303,6 +305,8 @@ wait(void)
         p->name[0] = 0;
         p->killed = 0;
         p->state = UNUSED;
+        p->totalticks = 0;
+        p->lastrunticks = 0;
         release(&ptable.lock);
         return pid;
       }
@@ -337,7 +341,9 @@ scheduler(void)
   for(;;){
     // Enable interrupts on this processor.
     sti();
-
+    acquire(&tickslock);
+    int curticks = ticks;
+    release(&tickslock);
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
 
@@ -365,11 +371,12 @@ scheduler(void)
         // cprintf("finding...ticketcounter = %d, lottery = %d, pid = %d, p->state = %d\n", ticketcounter, lottery, p->pid, p->state);
       }
     }
-    // cprintf("found. total = %d, lottery = %d, pid = %d\n", ptable.totaltickets, lottery, p->pid);
+    // cprintf("found. total = %d, lottery = %d, pid = %d\n", totalticket, lottery, p->pid);
     // Switch to chosen process.  It is the process's job
     // to release ptable.lock and then reacquire it
     // before jumping back to us.
     c->proc = p;
+    p->lastrunticks = curticks;
     switchuvm(p);
     p->state = RUNNING;
 
@@ -413,6 +420,9 @@ sched(void)
 void
 yield(void)
 {
+  acquire(&tickslock);
+  myproc()->totalticks += ticks - myproc()->lastrunticks;
+  release(&tickslock);
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
   sched();
@@ -453,6 +463,9 @@ sleep(void *chan, struct spinlock *lk)
   if(lk == 0)
     panic("sleep without lk");
 
+  acquire(&tickslock);
+  p->totalticks += ticks - p->lastrunticks;
+  release(&tickslock);
   // Must acquire ptable.lock in order to
   // change p->state and then call sched.
   // Once we hold ptable.lock, we can be
@@ -551,7 +564,7 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    cprintf("%d %s %s", p->pid, state, p->name);
+    cprintf("%d %s %s %d %d\n", p->pid, state, p->name, p->totalticks, p->tickets);
     if(p->state == SLEEPING){
       getcallerpcs((uint*)p->context->ebp+2, pc);
       for(i=0; i<10 && pc[i] != 0; i++)
@@ -565,9 +578,7 @@ int settickets(int new)
 {
   struct proc *curproc = myproc();
   acquire(&ptable.lock);
-  ptable.totaltickets -= curproc->tickets;
   curproc->tickets = new;
-  ptable.totaltickets += new;
   release(&ptable.lock);
   return 0;
 }
@@ -590,7 +601,7 @@ int getpinfo(struct pstat *ps)
     ps->pid[i] = p->pid;
     ps->tickets[i] = p->tickets;
     // TODO: store the ticks for the process
-    ps->ticks[i] = 0;
+    ps->ticks[i] = p->totalticks;
   }
 
   return 0;
