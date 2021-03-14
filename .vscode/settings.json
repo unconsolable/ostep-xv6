@@ -4,6 +4,7 @@
         "param.h": "c",
         "traps.h": "c",
         "defs.h": "c",
-        "user.h": "c"
+        "user.h": "c",
+        "proc.h": "c"
     }
 }
