@@ -182,12 +182,14 @@ UPROGS=\
 	_usertests\
 	_wc\
 	_zombie\
-	_lotterytest\
-	_nullptrtest\
-	_modinstrtest\
-	_threadtest\
-	_threadtest1\
-	_threadtest2\
+
+# _lotterytest\
+_nullptrtest\
+_modinstrtest\
+_threadtest\
+_threadtest1\
+_threadtest2\
+_threadtest3\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)

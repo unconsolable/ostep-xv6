@@ -2,11 +2,14 @@
 #include "stat.h"
 #include "user.h"
 #include "param.h"
+#include "ticketlock.h"
 
 // Memory allocator by Kernighan and Ritchie,
 // The C programming Language, 2nd ed.  Section 8.7.
 
 typedef long Align;
+
+lock_t malloclk;
 
 union header {
   struct {
@@ -21,8 +24,20 @@ typedef union header Header;
 static Header base;
 static Header *freep;
 
+void free1(void *ap);
+
 void
 free(void *ap)
+{
+  lock_acquire(&malloclk);
+  free1(ap);
+  lock_release(&malloclk);
+}
+
+// free without lock
+// grant lock before call
+void
+free1(void *ap)
 {
   Header *bp, *p;
 
@@ -56,7 +71,7 @@ morecore(uint nu)
     return 0;
   hp = (Header*)p;
   hp->s.size = nu;
-  free((void*)(hp + 1));
+  free1((void*)(hp + 1));
   return freep;
 }
 
@@ -66,6 +81,7 @@ malloc(uint nbytes)
   Header *p, *prevp;
   uint nunits;
 
+  lock_acquire(&malloclk);
   nunits = (nbytes + sizeof(Header) - 1)/sizeof(Header) + 1;
   if((prevp = freep) == 0){
     base.s.ptr = freep = prevp = &base;
@@ -81,10 +97,13 @@ malloc(uint nbytes)
         p->s.size = nunits;
       }
       freep = prevp;
+      lock_release(&malloclk);
       return (void*)(p + 1);
     }
     if(p == freep)
-      if((p = morecore(nunits)) == 0)
+      if((p = morecore(nunits)) == 0) {
+        lock_release(&malloclk);
         return 0;
+      }
   }
 }
