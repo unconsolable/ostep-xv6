@@ -5,6 +5,8 @@
         "traps.h": "c",
         "defs.h": "c",
         "user.h": "c",
-        "proc.h": "c"
+        "proc.h": "c",
+        "spinlock.h": "c",
+        "ticketlock.h": "c"
     }
 }

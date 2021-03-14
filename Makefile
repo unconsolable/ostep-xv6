@@ -187,6 +187,7 @@ UPROGS=\
 	_modinstrtest\
 	_threadtest\
 	_threadtest1\
+	_threadtest2\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)

@@ -1,4 +1,5 @@
 #include "pstat.h"
+#include "ticketlock.h"
 
 struct stat;
 struct rtcdate;
@@ -48,3 +49,6 @@ void free(void*);
 int atoi(const char*);
 int thread_create(void (*start_routine)(void *, void *), void *arg1, void *arg2);
 int thread_join();
+void lock_init(lock_t *);
+void lock_acquire(lock_t *);
+void lock_release(lock_t *);
